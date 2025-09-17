@@ -38,24 +38,45 @@ sudo chown -R www-data:www-data /var/www/html
 ```
 
 #### SSH密钥配置
+
+**为GitHub生成SSH密钥对**
 ```bash
-# 在Jenkins服务器生成SSH密钥对
-ssh-keygen -t rsa -b 4096 -C "jenkins@yourcompany.com"
+# 在Jenkins服务器生成GitHub SSH密钥对
+ssh-keygen -t rsa -b 4096 -C "jenkins@yourcompany.com" -f ~/.ssh/github_rsa
+
+# 将公钥添加到GitHub账户
+cat ~/.ssh/github_rsa.pub
+# 复制输出内容，在GitHub Settings > SSH and GPG keys 中添加
+```
+
+**为阿里云服务器生成SSH密钥对**
+```bash
+# 在Jenkins服务器生成阿里云SSH密钥对
+ssh-keygen -t rsa -b 4096 -C "jenkins-deploy@yourcompany.com" -f ~/.ssh/aliyun_rsa
 
 # 将公钥添加到阿里云服务器
-ssh-copy-id root@your-aliyun-server-ip
+ssh-copy-id -i ~/.ssh/aliyun_rsa.pub root@your-aliyun-server-ip
 ```
 
 ### 3. Jenkins凭据配置
 
-#### 添加SSH凭据
+#### 添加GitHub SSH凭据
+1. **Manage Jenkins** → **Manage Credentials**
+2. **System** → **Global credentials** → **Add Credentials**
+3. 选择类型: **SSH Username with private key**
+4. 配置信息:
+   - ID: `github-ssh-key`
+   - Username: `git`
+   - Private Key: 粘贴GitHub SSH私钥内容
+
+#### 添加阿里云SSH凭据
 1. **Manage Jenkins** → **Manage Credentials**
 2. **System** → **Global credentials** → **Add Credentials**
 3. 选择类型: **SSH Username with private key**
 4. 配置信息:
    - ID: `aliyun-ssh-key`
    - Username: `root` (或你的用户名)
-   - Private Key: 粘贴私钥内容
+   - Private Key: 粘贴阿里云服务器SSH私钥内容
 
 #### 添加邮件配置（可选）
 1. **Manage Jenkins** → **Configure System**
@@ -65,6 +86,30 @@ ssh-copy-id root@your-aliyun-server-ip
    - 用户名/密码
 
 ## Jenkins Pipeline项目创建步骤
+
+### 0. GitHub仓库配置
+
+**项目仓库**: `git@github.com:shijinke1990/jenkins_demo.git`
+
+#### GitHub SSH密钥配置步骤：
+1. **生成SSH密钥对**（在Jenkins服务器上执行）：
+   ```bash
+   ssh-keygen -t rsa -b 4096 -C "jenkins@yourcompany.com" -f ~/.ssh/github_rsa
+   ```
+
+2. **添加公钥到GitHub**：
+   - 复制公钥内容：`cat ~/.ssh/github_rsa.pub`
+   - 登录GitHub → Settings → SSH and GPG keys → New SSH key
+   - 粘贴公钥内容并保存
+
+3. **测试SSH连接**：
+   ```bash
+   ssh -T git@github.com -i ~/.ssh/github_rsa
+   ```
+
+4. **在Jenkins中配置SSH凭据**：
+   - 复制私钥内容：`cat ~/.ssh/github_rsa`
+   - 在Jenkins中添加凭据（ID: `github-ssh-key`）
 
 ### 1. 创建新任务
 1. 登录Jenkins

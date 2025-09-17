@@ -2,14 +2,14 @@ pipeline {
     agent any
     
     environment {
-        // GitHub仓库配置 - 暂时使用HTTPS方式
-        GIT_REPO = 'https://github.com/shijinke1990/jenkins_demo.git'
+        // GitHub仓库配置
+        GIT_REPO = 'git@github.com:shijinke1990/jenkins_demo.git'
         GIT_BRANCH = 'main'
-        // 阿里云服务器配置  
+        // 阿里云服务器配置
         ALIYUN_HOST = '你的阿里云服务器IP'
-        ALIYUN_USER = 'root'
-        DEPLOY_PATH = '/var/www/html'
-        NODE_VERSION = '20'
+        ALIYUN_USER = 'root'  // 或其他用户名
+        DEPLOY_PATH = '/var/www/html'  // 部署目录
+        NODE_VERSION = '20'  // Node.js版本
     }
     
     // 暂时注释掉tools配置，避免NodeJS工具配置问题
@@ -27,14 +27,13 @@ pipeline {
                 // 清理工作空间
                 deleteDir()
                 
-                // 从GitHub检出代码 - 使用HTTPS方式，无需SSH凭据
+                // 从GitHub检出代码
                 checkout([
                     $class: 'GitSCM',
                     branches: [[name: "*/${GIT_BRANCH}"]],
                     userRemoteConfigs: [[
-                        url: "${GIT_REPO}"
-                        // 暂时不使用SSH凭据，使用公开仓库HTTPS访问
-                        // credentialsId: 'github-ssh-key'
+                        url: "${GIT_REPO}",
+                        credentialsId: 'github-ssh-key' // 需要在Jenkins中配置GitHub SSH密钥
                     ]]
                 ])
                 
@@ -50,16 +49,44 @@ pipeline {
             }
         }
         
+        stage('环境检查') {
+            steps {
+                echo '检查构建环境...'
+                script {
+                    // 检查Node.js和npm是否可用
+                    sh 'node --version || echo "Node.js未安装"'
+                    sh 'npm --version || echo "npm未安装"'
+                    
+                    // 安装Node.js（如果未安装）
+                    try {
+                        sh 'node --version'
+                    } catch (Exception e) {
+                        echo '安装Node.js...'
+                        sh '''
+                            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+                            sudo apt-get install -y nodejs
+                        '''
+                    }
+                }
+            }
+        }
+        
         stage('安装依赖') {
             steps {
                 echo '安装项目依赖...'
                 script {
                     if (isUnix()) {
-                        sh 'npm install -g pnpm'
-                        sh 'pnpm install'
+                        sh '''
+                            # 安装pnpm
+                            npm install -g pnpm
+                            # 安装项目依赖
+                            pnpm install
+                        '''
                     } else {
-                        bat 'npm install -g pnpm'
-                        bat 'pnpm install'
+                        bat '''
+                            npm install -g pnpm
+                            pnpm install
+                        '''
                     }
                 }
             }
@@ -111,8 +138,10 @@ pipeline {
                 script {
                     if (isUnix()) {
                         sh '''
+                            # 创建带时间戳的压缩包
                             TIMESTAMP=$(date +%Y%m%d-%H%M%S)
                             tar -czf "dist-${TIMESTAMP}.tar.gz" dist/
+                            # 创建一个通用名称的链接
                             ln -sf "dist-${TIMESTAMP}.tar.gz" dist.tar.gz
                             echo "构建包: dist-${TIMESTAMP}.tar.gz"
                         '''
@@ -162,7 +191,7 @@ pipeline {
                                     echo "新版本解压完成"
                                     
                                     # 设置权限
-                                    chown -R www-data:www-data ${DEPLOY_PATH} 2>/dev/null || true
+                                    chown -R www-data:www-data ${DEPLOY_PATH}
                                     chmod -R 755 ${DEPLOY_PATH}
                                     
                                     # 重启Nginx（如果使用）
@@ -254,11 +283,7 @@ pipeline {
             echo '清理工作空间...'
             script {
                 // 清理构建产物，但保留源代码
-                if (isUnix()) {
-                    sh 'rm -f *.tar.gz *.zip 2>/dev/null || true'
-                } else {
-                    bat 'del /Q *.tar.gz *.zip 2>nul || echo "清理完成"'
-                }
+                sh 'rm -f *.tar.gz *.zip 2>/dev/null || true'
                 echo '清理完成'
             }
         }
