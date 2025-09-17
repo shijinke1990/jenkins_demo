@@ -103,4 +103,4 @@ export default tseslint.config([
   },
 ])
 ```
-wwww
+qqq
