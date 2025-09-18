@@ -2,20 +2,20 @@ pipeline {
     agent any
     
     environment {
-        // GitHub仓库配置 - 暂时使用HTTPS方式
-        GIT_REPO = 'https://github.com/shijinke1990/jenkins_demo.git'
+        // GitHub仓库配置 - 使用SSH方式
+        GIT_REPO = 'git@github.com:shijinke1990/jenkins_demo.git'
         GIT_BRANCH = 'main'
         // 阿里云服务器配置  
-        ALIYUN_HOST = '你的阿里云服务器IP'
+        ALIYUN_HOST = '120.55.61.109'
         ALIYUN_USER = 'root'
         DEPLOY_PATH = '/var/www/html'
         NODE_VERSION = '20'
     }
     
     // 暂时注释掉tools配置，避免NodeJS工具配置问题
-    // tools {
-    //     nodejs "Node-${NODE_VERSION}"
-    // }
+    tools {
+        nodejs "NodeJS 22"
+    }
     
     stages {
         stage('检出代码') {
@@ -27,16 +27,28 @@ pipeline {
                 // 清理工作空间
                 deleteDir()
                 
-                // 从GitHub检出代码 - 使用HTTPS方式，无需SSH凭据
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: "*/${GIT_BRANCH}"]],
-                    userRemoteConfigs: [[
-                        url: "${GIT_REPO}"
-                        // 暂时不使用SSH凭据，使用公开仓库HTTPS访问
-                        // credentialsId: 'github-ssh-key'
-                    ]]
-                ])
+                // 使用withCredentials以SSH方式从GitHub检出代码
+                withCredentials([sshUserPrivateKey(
+                    credentialsId: 'github-ssh-key', // 使用您的GitHub SSH凭据 ID
+                    keyFileVariable: 'SSH_KEY',
+                    usernameVariable: 'SSH_USER'
+                )]) {
+                    sh '''
+                        # 配置SSH环境
+                        mkdir -p ~/.ssh
+                        cp "$SSH_KEY" ~/.ssh/github_key
+                        chmod 600 ~/.ssh/github_key
+                        
+                        # 添加GitHub到known_hosts
+                        ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null || true
+                        
+                        # 配置Git使用此SSH密钥
+                        export GIT_SSH_COMMAND="ssh -i ~/.ssh/github_key -o StrictHostKeyChecking=no"
+                        
+                        # 克隆仓库
+                        git clone -b ${GIT_BRANCH} ${GIT_REPO} .
+                    '''
+                }
                 
                 // 显示当前提交信息
                 script {
@@ -132,16 +144,26 @@ pipeline {
         stage('部署到阿里云') {
             steps {
                 echo '开始部署到阿里云服务器...'
-                script {
-                    // 使用SSH凭据部署
-                    sshagent(['aliyun-ssh-key']) {
+                
+                // 使用withCredentials以SSH方式连接阿里云服务器
+                withCredentials([sshUserPrivateKey(
+                    credentialsId: 'e8886fbc-df55-4ec4-aae1-b596c9d7436b', // 使用您的阿里云SSH凭据 ID
+                    keyFileVariable: 'SSH_KEY',
+                    usernameVariable: 'SSH_USER'
+                )]) {
+                    script {
                         if (isUnix()) {
                             sh """
+                                # 配置SSH环境
+                                mkdir -p ~/.ssh
+                                cp "$SSH_KEY" ~/.ssh/aliyun_key
+                                chmod 600 ~/.ssh/aliyun_key
+                                
                                 # 上传构建产物
-                                scp -o StrictHostKeyChecking=no dist.tar.gz ${ALIYUN_USER}@${ALIYUN_HOST}:/tmp/
+                                scp -i ~/.ssh/aliyun_key -o StrictHostKeyChecking=no dist.tar.gz ${ALIYUN_USER}@${ALIYUN_HOST}:/tmp/
                                 
                                 # 连接服务器并部署
-                                ssh -o StrictHostKeyChecking=no ${ALIYUN_USER}@${ALIYUN_HOST} '
+                                ssh -i ~/.ssh/aliyun_key -o StrictHostKeyChecking=no ${ALIYUN_USER}@${ALIYUN_HOST} '
                                     echo "开始部署..."
                                     
                                     # 备份旧版本
@@ -180,8 +202,8 @@ pipeline {
                         } else {
                             // Windows环境使用pscp和plink
                             bat """
-                                pscp -i "C:\\path\\to\\private\\key.ppk" -scp dist.zip ${ALIYUN_USER}@${ALIYUN_HOST}:/tmp/
-                                plink -i "C:\\path\\to\\private\\key.ppk" ${ALIYUN_USER}@${ALIYUN_HOST} "cd ${DEPLOY_PATH} && unzip -o /tmp/dist.zip && rm /tmp/dist.zip"
+                                pscp -i "$SSH_KEY" -scp dist.zip ${ALIYUN_USER}@${ALIYUN_HOST}:/tmp/
+                                plink -i "$SSH_KEY" ${ALIYUN_USER}@${ALIYUN_HOST} "cd ${DEPLOY_PATH} && unzip -o /tmp/dist.zip && rm /tmp/dist.zip"
                             """
                         }
                     }
