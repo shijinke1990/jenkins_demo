@@ -12,9 +12,9 @@ pipeline {
         NODE_VERSION = '20'
     }
     
-    // 暂时注释掉tools配置，避免NodeJS工具配置问题
+    // 根据内存知识配置Node.js 20.x版本
     tools {
-        nodejs "NodeJS 22"
+        nodejs "NodeJS 20"
     }
     
     stages {
@@ -29,7 +29,7 @@ pipeline {
                 
                 // 使用withCredentials以SSH方式从GitHub检出代码
                 withCredentials([sshUserPrivateKey(
-                    credentialsId: 'github-ssh-key', // 使用您的GitHub SSH凭据 ID
+                    credentialsId: 'a408b264-fbfc-4193-8f32-fe850c47e93f', // 使用您的GitHub SSH凭据 ID
                     keyFileVariable: 'SSH_KEY',
                     usernameVariable: 'SSH_USER'
                 )]) {
@@ -141,9 +141,9 @@ pipeline {
             }
         }
         
-        stage('部署到阿里云') {
+        stage('Docker容器部署') {
             steps {
-                echo '开始部署到阿里云服务器...'
+                echo '开始Docker容器化部署到阿里云服务器...'
                 
                 // 使用withCredentials以SSH方式连接阿里云服务器
                 withCredentials([sshUserPrivateKey(
@@ -162,62 +162,36 @@ pipeline {
                                 # 上传构建产物
                                 scp -i ~/.ssh/aliyun_key -o StrictHostKeyChecking=no dist.tar.gz ${ALIYUN_USER}@${ALIYUN_HOST}:/tmp/
                                 
-                                # 连接服务器并部署
+                                # 连接服务器并执行Docker部署
                                 ssh -i ~/.ssh/aliyun_key -o StrictHostKeyChecking=no ${ALIYUN_USER}@${ALIYUN_HOST} '
-                                    echo "开始部署..."
+                                    echo "开始Docker容器化部署..."
                                     
-                                    # 检测并安装Nginx
-                                    if ! command -v nginx > /dev/null; then
-                                        echo "Nginx未安装，开始安装..."
-                                        # 检测系统类型并安装Nginx
-                                        if [ -f /etc/debian_version ]; then
-                                            # Debian/Ubuntu系统
-                                            apt-get update && apt-get install -y nginx
-                                        elif [ -f /etc/redhat-release ]; then
-                                            # CentOS/RHEL系统
-                                            yum install -y nginx || dnf install -y nginx
-                                        elif [ -f /etc/alpine-release ]; then
-                                            # Alpine系统
-                                            apk update && apk add nginx
-                                        else
-                                            echo "未识别的系统类型，请手动安装Nginx"
-                                            exit 1
-                                        fi
-                                        echo "Nginx安装完成"
-                                    else
-                                        echo "Nginx已安装: $(nginx -v 2>&1)"
+                                    # 检查Docker是否运行
+                                    if ! docker info >/dev/null 2>&1; then
+                                        echo "❌ Docker服务未运行，请检查Docker状态"
+                                        systemctl status docker
+                                        exit 1
                                     fi
+                                    echo "✅ Docker服务运行正常"
                                     
-                                    # 备份旧版本
-                                    if [ -d ${DEPLOY_PATH}_backup ]; then
-                                        rm -rf ${DEPLOY_PATH}_backup
-                                    fi
-                                    if [ -d ${DEPLOY_PATH} ]; then
-                                        mv ${DEPLOY_PATH} ${DEPLOY_PATH}_backup
-                                        echo "已备份旧版本"
-                                    fi
+                                    # 创建项目目录
+                                    PROJECT_DIR="/opt/react-app"
+                                    mkdir -p "$PROJECT_DIR"
+                                    cd "$PROJECT_DIR"
                                     
-                                    # 创建部署目录
-                                    mkdir -p ${DEPLOY_PATH}
+                                    # 解压前端构建产物
+                                    echo "📦 解压前端构建产物..."
+                                    rm -rf dist 2>/dev/null || true
+                                    tar -xzf /tmp/dist.tar.gz
+                                    echo "✅ 构建产物解压完成"
                                     
-                                    # 解压新版本
-                                    cd ${DEPLOY_PATH}
-                                    tar -xzf /tmp/dist.tar.gz --strip-components=1
-                                    echo "新版本解压完成"
-                                    
-                                    # 设置权限
-                                    chown -R www-data:www-data ${DEPLOY_PATH} 2>/dev/null || chown -R nginx:nginx ${DEPLOY_PATH} 2>/dev/null || true
-                                    chmod -R 755 ${DEPLOY_PATH}
-                                    
-                                    # 配置Nginx
-                                    echo "配置Nginx..."
-                                    
-                                    # 创建Nginx配置
-                                    cat > /etc/nginx/sites-available/react-app 2>/dev/null || cat > /etc/nginx/conf.d/react-app.conf << "EOF"
+                                    # 创建Nginx配置文件
+                                    echo "⚙️  创建Nginx配置文件..."
+                                    cat > nginx.conf << "NGINX_EOF"
 server {
     listen 80;
     server_name _;
-    root ${DEPLOY_PATH};
+    root /usr/share/nginx/html;
     index index.html index.htm;
     
     # 启用Gzip压缩
@@ -239,140 +213,158 @@ server {
     
     # 处理React Router的前端路由
     location / {
-        try_files \$uri \$uri/ /index.html;
+        try_files \\$uri \\$uri/ /index.html;
     }
     
     # 静态资源缓存
-    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)\$ {
+    location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)\\$ {
         expires 1y;
         add_header Cache-Control "public, immutable";
         access_log off;
     }
-    
-    # API代理（如需要）
-    # location /api/ {
-    #     proxy_pass http://localhost:3001/;
-    #     proxy_set_header Host \$host;
-    #     proxy_set_header X-Real-IP \$remote_addr;
-    #     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    #     proxy_set_header X-Forwarded-Proto \$scheme;
-    # }
     
     # 安全headers
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-XSS-Protection "1; mode=block" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "no-referrer-when-downgrade" always;
-    add_header Content-Security-Policy "default-src '"'"'self'"'"' http: https: data: blob: '"'"'unsafe-inline'"'"'" always;
+    add_header Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline'" always;
     
     # 隐藏Nginx版本
     server_tokens off;
     
-    # 错误页面
+    # 错误页面处理
     error_page 404 /index.html;
     error_page 500 502 503 504 /50x.html;
     location = /50x.html {
         root /usr/share/nginx/html;
     }
 }
-EOF
+NGINX_EOF
+                                    echo "✅ Nginx配置文件创建完成"
                                     
-                                    # 启用站点配置（Ubuntu/Debian）
-                                    if [ -d "/etc/nginx/sites-available" ]; then
-                                        ln -sf /etc/nginx/sites-available/react-app /etc/nginx/sites-enabled/react-app
-                                        # 删除默认配置
-                                        rm -f /etc/nginx/sites-enabled/default
-                                    fi
+                                    # 停止并删除旧容器
+                                    echo "🗑️  清理旧容器..."
+                                    docker stop react-app-nginx 2>/dev/null || true
+                                    docker rm react-app-nginx 2>/dev/null || true
+                                    echo "✅ 旧容器清理完成"
                                     
-                                    # 测试Nginx配置
-                                    if nginx -t; then
-                                        echo "Nginx配置测试通过"
+                                    # 拉取Nginx镜像
+                                    echo "📥 拉取Nginx镜像..."
+                                    docker pull nginx:alpine
+                                    echo "✅ Nginx镜像拉取完成"
+                                    
+                                    # 启动新的Nginx容器
+                                    echo "🚀 启动新的Nginx容器..."
+                                    docker run -d \
+                                        --name react-app-nginx \
+                                        --restart unless-stopped \
+                                        -p 80:80 \
+                                        -v "$PROJECT_DIR/dist:/usr/share/nginx/html:ro" \
+                                        -v "$PROJECT_DIR/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+                                        nginx:alpine
+                                    
+                                    # 等待容器启动
+                                    sleep 5
+                                    
+                                    # 检查容器状态
+                                    if docker ps | grep -q react-app-nginx; then
+                                        echo "✅ Nginx容器启动成功"
+                                        docker ps --filter name=react-app-nginx --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
                                     else
-                                        echo "Nginx配置有误，请检查"
+                                        echo "❌ Nginx容器启动失败"
+                                        docker logs react-app-nginx
                                         exit 1
                                     fi
                                     
-                                    # 启动并启用Nginx服务
-                                    systemctl enable nginx 2>/dev/null || true
-                                    systemctl start nginx 2>/dev/null || service nginx start
-                                    systemctl reload nginx 2>/dev/null || service nginx reload
-                                    echo "Nginx服务已启动并重载配置"
-                                    
-                                    # 检查Nginx状态
-                                    if systemctl is-active --quiet nginx 2>/dev/null || service nginx status >/dev/null 2>&1; then
-                                        echo "✅ Nginx运行正常"
-                                    else
-                                        echo "⚠️ Nginx可能未正常启动，请检查日志"
-                                    fi
+                                    # 查看容器日志
+                                    echo "📋 容器启动日志:"
+                                    docker logs --tail 10 react-app-nginx
                                     
                                     # 清理临时文件
                                     rm -f /tmp/dist.tar.gz
                                     
-                                    echo "部署完成！"
-                                    echo "项目访问地址: http://$(hostname -I | awk "{print \$1}")"
+                                    echo "✅ Docker容器部署完成！"
+                                    echo "🌐 项目访问地址: http://$(curl -s ifconfig.me || hostname -I | awk "{print \$1}")"
                                 '
                             """
                         } else {
-                            // Windows环境使用pscp和plink
-                            bat """
-                                pscp -i "$SSH_KEY" -scp dist.zip ${ALIYUN_USER}@${ALIYUN_HOST}:/tmp/
-                                plink -i "$SSH_KEY" ${ALIYUN_USER}@${ALIYUN_HOST} "cd ${DEPLOY_PATH} && unzip -o /tmp/dist.zip && rm /tmp/dist.zip"
-                            """
+                            // Windows环境暂不支持Docker部署
+                            error "Windows环境暂不支持Docker容器部署，请使用Linux环境"
                         }
                     }
                 }
             }
         }
         
-        stage('健康检查') {
+        stage('Docker容器健康检查') {
             steps {
-                echo '执行部署后健康检查...'
+                echo '执行Docker容器部署后健康检查...'
                 script {
-                    // 等待服务启动
-                    sleep(time: 10, unit: 'SECONDS')
+                    // 等待容器启动
+                    sleep(time: 15, unit: 'SECONDS')
                     
-                    // 使用SSH检查服务器状态
+                    // 使用SSH检查Docker容器状态
                     withCredentials([sshUserPrivateKey(
                         credentialsId: 'e8886fbc-df55-4ec4-aae1-b596c9d7436b',
                         keyFileVariable: 'SSH_KEY',
                         usernameVariable: 'SSH_USER'
                     )]) {
                         sh """
-                            # 检查服务器状态
+                            # 检查Docker容器状态
                             ssh -i ~/.ssh/aliyun_key -o StrictHostKeyChecking=no ${ALIYUN_USER}@${ALIYUN_HOST} '
-                                echo "=== 服务器状态检查 ==="
+                                echo "=== Docker容器状态检查 ==="
                                 
-                                # 检查Nginx状态
-                                if systemctl is-active --quiet nginx 2>/dev/null; then
-                                    echo "✅ Nginx服务运行正常"
-                                    echo "Nginx版本: $(nginx -v 2>&1)"
-                                    echo "Nginx配置测试: $(nginx -t 2>&1 | head -1)"
-                                elif service nginx status >/dev/null 2>&1; then
-                                    echo "✅ Nginx服务运行正常 (SysV)"
+                                # 检查Docker服务
+                                if docker info >/dev/null 2>&1; then
+                                    echo "✅ Docker服务运行正常"
+                                    echo "Docker版本: $(docker --version)"
                                 else
-                                    echo "❌ Nginx服务未运行"
+                                    echo "❌ Docker服务未运行"
+                                fi
+                                
+                                # 检查容器状态
+                                if docker ps --filter name=react-app-nginx --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -q react-app-nginx; then
+                                    echo "✅ react-app-nginx容器运行正常"
+                                    docker ps --filter name=react-app-nginx --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+                                    
+                                    # 检查容器资源使用
+                                    echo "容器资源使用情况:"
+                                    docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}" react-app-nginx
+                                    
+                                    # 检查容器日志
+                                    echo "最近5条容器日志:"
+                                    docker logs --tail 5 react-app-nginx
+                                else
+                                    echo "❌ react-app-nginx容器未运行"
+                                    echo "所有容器状态:"
+                                    docker ps -a
                                 fi
                                 
                                 # 检查端口监听状态
-                                if netstat -tlnp 2>/dev/null | grep ":80 " | grep -q nginx; then
-                                    echo "✅ Nginx正在监听80端口"
-                                elif ss -tlnp 2>/dev/null | grep ":80 " | grep -q nginx; then
-                                    echo "✅ Nginx正在监听80端口"
+                                if netstat -tlnp 2>/dev/null | grep ":80 " | grep -q docker; then
+                                    echo "✅ Docker容器正在监听80端口"
+                                elif ss -tlnp 2>/dev/null | grep ":80 " | grep -q docker; then
+                                    echo "✅ Docker容器正在监听80端口"
                                 else
-                                    echo "⚠️ 未检测到Nginx在80端口监听"
+                                    echo "⚠️ 未检测到Docker容器在80端口监听"
+                                    echo "当前端口监听情况:"
+                                    netstat -tlnp | grep :80 || ss -tlnp | grep :80 || echo "无端口80监听"
                                 fi
                                 
                                 # 检查部署文件
-                                if [ -f "${DEPLOY_PATH}/index.html" ]; then
+                                PROJECT_DIR="/opt/react-app"
+                                if [ -f "$PROJECT_DIR/dist/index.html" ]; then
                                     echo "✅ 部署文件存在"
-                                    echo "文件数量: $(find ${DEPLOY_PATH} -type f | wc -l)"
-                                    echo "目录大小: $(du -sh ${DEPLOY_PATH} | cut -f1)"
+                                    echo "文件数量: $(find $PROJECT_DIR/dist -type f | wc -l)"
+                                    echo "目录大小: $(du -sh $PROJECT_DIR/dist | cut -f1)"
                                 else
                                     echo "❌ 部署文件不存在"
                                 fi
                                 
-                                # 检查权限
-                                echo "文件权限: $(ls -la ${DEPLOY_PATH}/index.html 2>/dev/null || echo '文件不存在')"
+                                # 检查镜像信息
+                                echo "Nginx镜像信息:"
+                                docker images nginx:alpine --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
                                 
                                 echo "=== 状态检查完成 ==="
                             '
@@ -391,27 +383,47 @@ EOF
                         echo '✅ 网站部署成功，访问正常！'
                         echo "访问地址: http://${ALIYUN_HOST}"
                         
-                        // 测试静态资源
-                        def cssResponse = sh(
-                            script: "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 15 http://${ALIYUN_HOST}/assets/ 2>/dev/null || echo '404'",
+                        // 测试React路由
+                        def routeResponse = sh(
+                            script: "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 15 http://${ALIYUN_HOST}/nonexistent-route 2>/dev/null || echo '404'",
                             returnStdout: true
                         ).trim()
                         
-                        if (cssResponse == '200' || cssResponse == '403' || cssResponse == '404') {
-                            echo '✅ 静态资源路径可访问'
+                        if (routeResponse == '200') {
+                            echo '✅ React Router前端路由工作正常'
+                        }
+                        
+                        // 测试静态资源
+                        def assetsResponse = sh(
+                            script: "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 15 http://${ALIYUN_HOST}/assets/ 2>/dev/null || echo '403'",
+                            returnStdout: true
+                        ).trim()
+                        
+                        if (assetsResponse == '403' || assetsResponse == '404') {
+                            echo '✅ 静态资源路径配置正常'
+                        }
+                        
+                        // 测试Gzip压缩
+                        def gzipTest = sh(
+                            script: "curl -s -H 'Accept-Encoding: gzip' -I http://${ALIYUN_HOST} | grep -i 'content-encoding: gzip' || echo 'no-gzip'",
+                            returnStdout: true
+                        ).trim()
+                        
+                        if (gzipTest != 'no-gzip') {
+                            echo '✅ Gzip压缩启用正常'
                         }
                         
                     } else if (response == '000') {
                         echo '⚠️  无法连接到服务器，可能原因:'
                         echo '- 网络连接问题'
                         echo '- 防火墙阻止访问'
-                        echo '- Nginx服务未启动'
-                        echo '- 端口80未监听'
+                        echo '- Docker容器未启动'
+                        echo '- 端口80未映射正确'
                     } else if (response == '404') {
                         echo '⚠️  页面未找到，可能原因:'
-                        echo '- 部署文件不存在'
-                        echo '- Nginx配置有误'
-                        echo '- 文件权限问题'
+                        echo '- 部署文件不存在或路径不正确'
+                        echo '- Docker容器内Nginx配置有误'
+                        echo '- 文件挂载有问题'
                     } else {
                         echo "⚠️  网站访问异常，HTTP状态码: ${response}"
                         // 不阻止部署流程，只是警告
