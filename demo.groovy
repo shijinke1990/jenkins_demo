@@ -9,6 +9,7 @@ pipeline {
         ALIYUN_HOST = '120.55.61.109'
         ALIYUN_USER = 'root'
         DEPLOY_PATH = '/var/www/html'
+        // 部署目录已修改为 /var/www/html
         NODE_VERSION = '22'
         // 项目域名配置
         PROJECT_DOMAIN = 'demo.boluobo.com'
@@ -171,8 +172,8 @@ pipeline {
                         
                         # 在服务器上创建项目目录结构并处理版本更新
                         ssh -i ~/.ssh/aliyun_key -o StrictHostKeyChecking=no ${ALIYUN_USER}@${ALIYUN_HOST} '
-                            PROJECT_WEB_DIR="/var/www/${PROJECT_DOMAIN}"
-                            BACKUP_DIR="/var/www/backups/${PROJECT_DOMAIN}"
+                            PROJECT_WEB_DIR="${DEPLOY_PATH}"
+                            BACKUP_DIR="/var/www/backups/html"
                             TIMESTAMP=\$(date +%Y%m%d-%H%M%S)
                             
                             echo "📁 准备部署目录..."
@@ -213,7 +214,7 @@ pipeline {
                             
                             # 在服务器上解压并部署
                             ssh -i ~/.ssh/aliyun_key -o StrictHostKeyChecking=no ${ALIYUN_USER}@${ALIYUN_HOST} '
-                                PROJECT_WEB_DIR="/var/www/${PROJECT_DOMAIN}"
+                                PROJECT_WEB_DIR="${DEPLOY_PATH}"
                                 
                                 echo "📦 解压构建产物..."
                                 cd /tmp
@@ -243,7 +244,7 @@ pipeline {
                             scp -i ~/.ssh/aliyun_key -o StrictHostKeyChecking=no "${PROJECT_NAME}.zip" ${ALIYUN_USER}@${ALIYUN_HOST}:/tmp/
                             
                             ssh -i ~/.ssh/aliyun_key -o StrictHostKeyChecking=no ${ALIYUN_USER}@${ALIYUN_HOST} '
-                                PROJECT_WEB_DIR="/var/www/${PROJECT_DOMAIN}"
+                                PROJECT_WEB_DIR="${DEPLOY_PATH}"
                                 
                                 echo "📦 解压构建产物..."
                                 cd /tmp
@@ -284,7 +285,7 @@ pipeline {
                         def deploymentCheck = sh(
                             script: """
                                 ssh -i ~/.ssh/aliyun_key -o StrictHostKeyChecking=no ${ALIYUN_USER}@${ALIYUN_HOST} '
-                                    PROJECT_WEB_DIR="/var/www/${PROJECT_DOMAIN}"
+                                    PROJECT_WEB_DIR="${DEPLOY_PATH}"
                                     if [ -f "\$PROJECT_WEB_DIR/index.html" ]; then
                                         echo "SUCCESS"
                                     else
@@ -324,7 +325,7 @@ pipeline {
                         sh """
                             # 检查服务器状态
                             ssh -i ~/.ssh/aliyun_key -o StrictHostKeyChecking=no ${ALIYUN_USER}@${ALIYUN_HOST} '
-                                echo "=== ${PROJECT_DOMAIN} 服务器部署状态检查 ==="
+                                echo "=== ${PROJECT_DOMAIN} 服务器部署状态检查 (部署到 ${DEPLOY_PATH}) ==="
                                 
                                 # 检查Nginx服务状态
                                 if systemctl is-active --quiet nginx; then
@@ -355,7 +356,7 @@ pipeline {
                                 fi
                                 
                                 # 检查部署文件
-                                PROJECT_WEB_DIR="/var/www/${PROJECT_DOMAIN}"
+                                PROJECT_WEB_DIR="${DEPLOY_PATH}"
                                 if [ -f "\$PROJECT_WEB_DIR/index.html" ]; then
                                     echo "✅ 部署文件存在: \$PROJECT_WEB_DIR"
                                     echo "文件数量: \$(find \$PROJECT_WEB_DIR -type f | wc -l)"
@@ -367,12 +368,12 @@ pipeline {
                                 fi
                                 
                                 # 检查Nginx错误日志
-                                if [ -f "/var/log/nginx/${PROJECT_DOMAIN}_error.log" ]; then
-                                    ERROR_COUNT=\$(wc -l < "/var/log/nginx/${PROJECT_DOMAIN}_error.log" 2>/dev/null || echo "0")
+                                if [ -f "/var/log/nginx/error.log" ]; then
+                                    ERROR_COUNT=\$(wc -l < "/var/log/nginx/error.log" 2>/dev/null || echo "0")
                                     echo "错误日志条数: \$ERROR_COUNT"
                                     if [ "\$ERROR_COUNT" -gt 0 ]; then
                                         echo "最近5条错误日志:"
-                                        tail -5 "/var/log/nginx/${PROJECT_DOMAIN}_error.log" 2>/dev/null || echo "无法读取错误日志"
+                                        tail -5 "/var/log/nginx/error.log" 2>/dev/null || echo "无法读取错误日志"
                                     fi
                                 fi
                                 
@@ -402,7 +403,7 @@ pipeline {
                         echo "✅ 网站部署成功，${PROJECT_DOMAIN} 访问正常！"
                         echo "访问地址: http://${PROJECT_DOMAIN}"
                         echo "服务器IP: http://${ALIYUN_HOST}"
-                        echo "部署路径: /var/www/${PROJECT_DOMAIN}"
+                        echo "部署路径: ${DEPLOY_PATH}"
                         
                         // 测试React路由
                         def routeResponse = sh(
