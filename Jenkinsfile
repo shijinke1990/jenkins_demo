@@ -160,9 +160,9 @@ pipeline {
                 // 验证构建产物
                 script {
                     if (fileExists('dist/index.html')) {
-                        echo '✅ 构建成功，dist目录已生成'
+                        echo '✅ 构建成功，构建产物已生成'
                     } else {
-                        error '❌ 构建失败，未找到dist/index.html'
+                        error '❌ 构建失败，未找到构建产物'
                     }
                 }
             }
@@ -175,19 +175,19 @@ pipeline {
                     if (isUnix()) {
                         sh '''
                             TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-                            # 打包dist文件夹本身
-                            tar -czf "dist-${TIMESTAMP}.tar.gz" dist
-                            ln -sf "dist-${TIMESTAMP}.tar.gz" dist.tar.gz
-                            echo "构建包: dist-${TIMESTAMP}.tar.gz（包含dist文件夹）"
+                            # 打包dist目录内的所有文件，不包含dist目录本身
+                            cd dist && tar -czf "../build-${TIMESTAMP}.tar.gz" . && cd ..
+                            ln -sf "build-${TIMESTAMP}.tar.gz" build.tar.gz
+                            echo "构建包: build-${TIMESTAMP}.tar.gz（直接包含构建文件）"
                         '''
                     } else {
                         // Windows环境使用PowerShell压缩
                         powershell '''
                             $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-                            # 压缩dist文件夹本身
-                            Compress-Archive -Path .\\dist -DestinationPath "dist-$timestamp.zip" -Force
-                            Copy-Item "dist-$timestamp.zip" -Destination "dist.zip" -Force
-                            Write-Host "构建包: dist-$timestamp.zip（包含dist文件夹）"
+                            # 压缩dist目录内的所有文件，不包含dist目录本身
+                            Compress-Archive -Path .\\dist\\* -DestinationPath "build-$timestamp.zip" -Force
+                            Copy-Item "build-$timestamp.zip" -Destination "build.zip" -Force
+                            Write-Host "构建包: build-$timestamp.zip（直接包含构建文件）"
                         '''
                     }
                 }
@@ -213,7 +213,7 @@ pipeline {
                                 chmod 600 ~/.ssh/aliyun_key
                                 
                                 # 上传构建产物
-                                scp -i ~/.ssh/aliyun_key -o StrictHostKeyChecking=no dist.tar.gz ${ALIYUN_USER}@${ALIYUN_HOST}:/tmp/
+                                scp -i ~/.ssh/aliyun_key -o StrictHostKeyChecking=no build.tar.gz ${ALIYUN_USER}@${ALIYUN_HOST}:/tmp/
                                 
                                 # 连接服务器并执行部署
                                 ssh -i ~/.ssh/aliyun_key -o StrictHostKeyChecking=no ${ALIYUN_USER}@${ALIYUN_HOST} '
@@ -227,16 +227,10 @@ pipeline {
                                     rm -rf ${DEPLOY_PATH}/*
                                     echo "✅ 目标目录已清空"
                                     
-                                    # 解压构建产物并直接部署到目标目录
-                                    echo "📦 解压构建产物到目标目录..."
-                                    cd /tmp
-                                    tar -xzf /tmp/dist.tar.gz
-                                    # 将dist目录的内容直接复制到目标目录（不保留dist目录层级）
-                                    cp -r dist/* ${DEPLOY_PATH}/
-                                    # 复制隐藏文件（如果有）
-                                    cp -r dist/.* ${DEPLOY_PATH}/ 2>/dev/null || true
-                                    # 清理临时dist目录
-                                    rm -rf /tmp/dist
+                                    # 直接解压构建产物到目标目录
+                                    echo "📦 直接解压构建产物到目标目录..."
+                                    cd ${DEPLOY_PATH}
+                                    tar -xzf /tmp/build.tar.gz
                                     echo "✅ 构建产物直接部署到 ${DEPLOY_PATH} 完成"
                                     
                                     # 设置正确的文件权限
@@ -261,7 +255,7 @@ pipeline {
                                     fi
                                     
                                     # 清理临时文件
-                                    rm -f /tmp/dist.tar.gz
+                                    rm -f /tmp/build.tar.gz
                                     
                                     echo "✅ 部署完成！"
                                     echo "🌐 部署路径: ${DEPLOY_PATH}"
@@ -431,9 +425,9 @@ pipeline {
             script {
                 // 清理构建产物，但保留源代码
                 if (isUnix()) {
-                    sh 'rm -f *.tar.gz *.zip 2>/dev/null || true'
+                    sh 'rm -f build*.tar.gz build*.zip 2>/dev/null || true'
                 } else {
-                    bat 'del /Q *.tar.gz *.zip 2>nul || echo "清理完成"'
+                    bat 'del /Q build*.tar.gz build*.zip 2>nul || echo "清理完成"'
                 }
                 echo '清理完成'
             }
