@@ -1,15 +1,7 @@
 pipeline {
     agent any
     
-    // 添加参数配置，支持选择分支或tag
-    parameters {
-        string(
-            name: 'BRANCH_OR_TAG',
-            defaultValue: 'origin/dev',
-            description: '请输入要构建的分支或tag名称（例如：origin/dev, origin/main, v1.0.0, v1.1.0等）',
-            trim: true
-        )
-    }
+    // 使用现有的中文参数配置
     
     environment {
         // GitHub仓库配置 - 使用SSH方式
@@ -31,7 +23,7 @@ pipeline {
             steps {
                 echo '开始从GitHub检出代码...'
                 echo "仓库地址: ${GIT_REPO}"
-                echo "目标分支/标签: ${params.BRANCH_OR_TAG}"
+                echo "目标分支/标签: ${params['选择标签或分支']}"
                 
                 // 清理工作空间
                 deleteDir()
@@ -40,14 +32,13 @@ pipeline {
                 script {
                     // 参数调试信息
                     echo "🔍 参数调试信息:"
-                    echo "  - params.BRANCH_OR_TAG: ${params.BRANCH_OR_TAG}"
+                    echo "  - 选择标签或分支: ${params['选择标签或分支']}"
                     echo "  - params对象: ${params}"
                     
-                    def branchOrTag = params.BRANCH_OR_TAG
+                    def branchOrTag = params['选择标签或分支']
                     if (!branchOrTag || branchOrTag.trim() == "") {
                         branchOrTag = 'origin/dev'
                         echo "⚠️  参数为空，使用默认值: ${branchOrTag}"
-                        echo "ℹ️  如果这是第一次构建，请重新运行构建以使用您选择的参数"
                     } else {
                         echo "✅ 使用用户指定的参数: ${branchOrTag}"
                     }
@@ -169,9 +160,9 @@ pipeline {
                 // 验证构建产物
                 script {
                     if (fileExists('dist/index.html')) {
-                        echo '✅ 构建成功，dist目录已生成'
+                        echo '✅ 构建成功，构建产物已生成'
                     } else {
-                        error '❌ 构建失败，未找到dist/index.html'
+                        error '❌ 构建失败，未找到构建产物'
                     }
                 }
             }
@@ -184,17 +175,19 @@ pipeline {
                     if (isUnix()) {
                         sh '''
                             TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-                            tar -czf "dist-${TIMESTAMP}.tar.gz" dist/
-                            ln -sf "dist-${TIMESTAMP}.tar.gz" dist.tar.gz
-                            echo "构建包: dist-${TIMESTAMP}.tar.gz"
+                            # 打包dist目录内的所有文件，不包含dist目录本身
+                            cd dist && tar -czf "../build-${TIMESTAMP}.tar.gz" . && cd ..
+                            ln -sf "build-${TIMESTAMP}.tar.gz" build.tar.gz
+                            echo "构建包: build-${TIMESTAMP}.tar.gz（直接包含构建文件）"
                         '''
                     } else {
                         // Windows环境使用PowerShell压缩
                         powershell '''
                             $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-                            Compress-Archive -Path .\\dist\\* -DestinationPath "dist-$timestamp.zip" -Force
-                            Copy-Item "dist-$timestamp.zip" -Destination "dist.zip" -Force
-                            Write-Host "构建包: dist-$timestamp.zip"
+                            # 压缩dist目录内的所有文件，不包含dist目录本身
+                            Compress-Archive -Path .\\dist\\* -DestinationPath "build-$timestamp.zip" -Force
+                            Copy-Item "build-$timestamp.zip" -Destination "build.zip" -Force
+                            Write-Host "构建包: build-$timestamp.zip（直接包含构建文件）"
                         '''
                     }
                 }
@@ -220,57 +213,53 @@ pipeline {
                                 chmod 600 ~/.ssh/aliyun_key
                                 
                                 # 上传构建产物
-                                scp -i ~/.ssh/aliyun_key -o StrictHostKeyChecking=no dist.tar.gz ${ALIYUN_USER}@${ALIYUN_HOST}:/tmp/
+                                scp -i ~/.ssh/aliyun_key -o StrictHostKeyChecking=no build.tar.gz ${ALIYUN_USER}@${ALIYUN_HOST}:/tmp/
                                 
                                 # 连接服务器并执行部署
                                 ssh -i ~/.ssh/aliyun_key -o StrictHostKeyChecking=no ${ALIYUN_USER}@${ALIYUN_HOST} '
-                                    echo "开始部署到/var/www/html..."
+                                    echo "开始部署到${DEPLOY_PATH}..."
                                     
                                     # 创建部署目录
                                     mkdir -p ${DEPLOY_PATH}
                                     
-                                    # 备份现有的部署（如果存在）
-                                    if [ -d "${DEPLOY_PATH}/dist" ]; then
-                                        echo "📦 备份现有部署..."
-                                        BACKUP_NAME="backup-\$(date +%Y%m%d-%H%M%S)"
-                                        mv "${DEPLOY_PATH}/dist" "${DEPLOY_PATH}/\$BACKUP_NAME" 2>/dev/null || true
-                                        echo "✅ 备份完成: ${DEPLOY_PATH}/\$BACKUP_NAME"
-                                    fi
+                                    # 清空目标目录，准备新部署
+                                    echo "🧹 清理目标目录..."
+                                    rm -rf ${DEPLOY_PATH}/*
+                                    echo "✅ 目标目录已清空"
                                     
-                                    # 解压前端构建产物到目标目录
-                                    echo "📦 解压构建产物到目标目录..."
+                                    # 直接解压构建产物到目标目录
+                                    echo "📦 直接解压构建产物到目标目录..."
                                     cd ${DEPLOY_PATH}
-                                    tar -xzf /tmp/dist.tar.gz
-                                    echo "✅ 构建产物部署完成"
+                                    tar -xzf /tmp/build.tar.gz
+                                    echo "✅ 构建产物直接部署到 ${DEPLOY_PATH} 完成"
                                     
                                     # 设置正确的文件权限
                                     echo "🔧 设置文件权限..."
-                                    chown -R www-data:www-data ${DEPLOY_PATH}/dist 2>/dev/null || chown -R nginx:nginx ${DEPLOY_PATH}/dist 2>/dev/null || true
-                                    find ${DEPLOY_PATH}/dist -type f -exec chmod 644 {} \\;
-                                    find ${DEPLOY_PATH}/dist -type d -exec chmod 755 {} \\;
+                                    chown -R www-data:www-data ${DEPLOY_PATH} 2>/dev/null || chown -R nginx:nginx ${DEPLOY_PATH} 2>/dev/null || true
+                                    find ${DEPLOY_PATH} -type f -exec chmod 644 {} \\;
+                                    find ${DEPLOY_PATH} -type d -exec chmod 755 {} \\;
                                     echo "✅ 文件权限设置完成"
                                     
                                     # 检查部署文件
-                                    if [ -f "${DEPLOY_PATH}/dist/index.html" ]; then
+                                    if [ -f "${DEPLOY_PATH}/index.html" ]; then
                                         echo "✅ 部署文件验证成功"
-                                        echo "文件数量: \$(find ${DEPLOY_PATH}/dist -type f | wc -l)"
-                                        echo "目录大小: \$(du -sh ${DEPLOY_PATH}/dist | cut -f1)"
+                                        echo "文件数量: \$(find ${DEPLOY_PATH} -type f | wc -l)"
+                                        echo "目录大小: \$(du -sh ${DEPLOY_PATH} | cut -f1)"
+                                        echo "📁 部署结构预览:"
+                                        ls -la ${DEPLOY_PATH}/ | head -10
                                     else
                                         echo "❌ 部署文件验证失败，未找到index.html"
+                                        echo "目录内容:"
+                                        ls -la ${DEPLOY_PATH}/
                                         exit 1
                                     fi
                                     
                                     # 清理临时文件
-                                    rm -f /tmp/dist.tar.gz
-                                    
-                                    # 清理旧备份（保留最近3个备份）
-                                    echo "🧹 清理旧备份..."
-                                    cd ${DEPLOY_PATH}
-                                    ls -dt backup-* 2>/dev/null | tail -n +4 | xargs rm -rf 2>/dev/null || true
+                                    rm -f /tmp/build.tar.gz
                                     
                                     echo "✅ 部署完成！"
-                                    echo "🌐 部署路径: ${DEPLOY_PATH}/dist"
-                                    echo "📁 项目文件已部署到服务器"
+                                    echo "🌐 部署路径: ${DEPLOY_PATH}"
+                                    echo "📁 构建产物已直接部署到 Nginx 根目录"
                                 '
                             """
                         } else {
@@ -301,35 +290,37 @@ pipeline {
                                 echo "=== 部署状态检查 ==="
                                 
                                 # 检查部署目录
-                                if [ -d "${DEPLOY_PATH}/dist" ]; then
-                                    echo "✅ 部署目录存在: ${DEPLOY_PATH}/dist"
-                                    echo "文件数量: \$(find ${DEPLOY_PATH}/dist -type f | wc -l)"
-                                    echo "目录大小: \$(du -sh ${DEPLOY_PATH}/dist | cut -f1)"
+                                if [ -d "${DEPLOY_PATH}" ]; then
+                                    echo "✅ 部署目录存在: ${DEPLOY_PATH}"
+                                    echo "文件数量: \$(find ${DEPLOY_PATH} -type f | wc -l)"
+                                    echo "目录大小: \$(du -sh ${DEPLOY_PATH} | cut -f1)"
                                 else
                                     echo "❌ 部署目录不存在"
                                     exit 1
                                 fi
                                 
                                 # 检查关键文件
-                                if [ -f "${DEPLOY_PATH}/dist/index.html" ]; then
+                                if [ -f "${DEPLOY_PATH}/index.html" ]; then
                                     echo "✅ 入口文件存在: index.html"
-                                    echo "文件大小: \$(ls -lh ${DEPLOY_PATH}/dist/index.html | awk \"{print \\\$5}\")"
+                                    echo "文件大小: \$(ls -lh ${DEPLOY_PATH}/index.html | awk \"{print \\\$5}\")"
                                 else
                                     echo "❌ 入口文件不存在"
+                                    echo "目录内容:"
+                                    ls -la ${DEPLOY_PATH}/
                                     exit 1
                                 fi
                                 
                                 # 检查静态资源目录
-                                if [ -d "${DEPLOY_PATH}/dist/assets" ]; then
+                                if [ -d "${DEPLOY_PATH}/assets" ]; then
                                     echo "✅ 静态资源目录存在"
-                                    echo "静态资源文件数量: \$(find ${DEPLOY_PATH}/dist/assets -type f | wc -l)"
+                                    echo "静态资源文件数量: \$(find ${DEPLOY_PATH}/assets -type f | wc -l)"
                                 else
                                     echo "ℹ️ 静态资源目录不存在（可能使用其他目录结构）"
                                 fi
                                 
                                 # 检查文件权限
                                 echo "📋 文件权限检查:"
-                                ls -la ${DEPLOY_PATH}/dist/ | head -5
+                                ls -la ${DEPLOY_PATH}/ | head -5
                                 
                                 # 检查Web服务器状态（如果存在）
                                 if command -v nginx >/dev/null 2>&1; then
@@ -434,11 +425,11 @@ pipeline {
             script {
                 // 清理构建产物，但保留源代码
                 if (isUnix()) {
-                    sh 'rm -f *.tar.gz *.zip 2>/dev/null || true'
+                    sh 'rm -f build*.tar.gz build*.zip 2>/dev/null || true'
                 } else {
-                    bat 'del /Q *.tar.gz *.zip 2>nul || echo "清理完成"'
+                    bat 'del /Q build*.tar.gz build*.zip 2>nul || echo "清理完成"'
                 }
-                echo '清理完成'
+                echo '清理完成nimabni'
             }
         }
     }
