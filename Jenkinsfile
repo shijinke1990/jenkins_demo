@@ -1,25 +1,19 @@
 pipeline {
     agent any
     
+    // 添加参数配置，支持选择分支或tag
     parameters {
-        gitParameter(
-            name: 'GIT_REF',
-            type: 'PT_BRANCH_TAG',
-            defaultValue: 'main',
-            description: '选择要构建的分支或Tag',
-            branchFilter: '.*',
-            tagFilter: '.*',
-            sortMode: 'DESCENDING_SMART',
-            selectedValue: 'DEFAULT',
-            quickFilterEnabled: true,
-            useRepository: 'git@github.com:shijinke1990/jenkins_demo.git'
+        string(
+            name: 'BRANCH_OR_TAG',
+            defaultValue: 'origin/dev',
+            description: '请输入要构建的分支或tag名称（例如：origin/dev, origin/main, v1.0.0, v1.1.0等）',
+            trim: true
         )
     }
     
     environment {
         // GitHub仓库配置 - 使用SSH方式
         GIT_REPO = 'git@github.com:shijinke1990/jenkins_demo.git'
-        GIT_BRANCH = 'main'
         // 阿里云服务器配置  
         ALIYUN_HOST = '120.55.61.109'
         ALIYUN_USER = 'root'
@@ -37,46 +31,82 @@ pipeline {
             steps {
                 echo '开始从GitHub检出代码...'
                 echo "仓库地址: ${GIT_REPO}"
-                script {
-                    env.GIT_REF = params.GIT_REF ?: GIT_BRANCH
-                }
-                echo "分支/Tag: ${env.GIT_REF}"
+                echo "目标分支/标签: ${params.BRANCH_OR_TAG}"
                 
                 // 清理工作空间
                 deleteDir()
                 
-                // 使用withCredentials以SSH方式从GitHub检出代码
-                withCredentials([sshUserPrivateKey(
-                    credentialsId: 'github-ssh-key', // 使用您的GitHub SSH凭据 ID
-                    keyFileVariable: 'SSH_KEY',
-                    usernameVariable: 'SSH_USER'
-                )]) {
-                    sh '''
-                        # 配置SSH环境
-                        mkdir -p ~/.ssh
-                        cp "$SSH_KEY" ~/.ssh/github_key
-                        chmod 600 ~/.ssh/github_key
-                        
-                        # 添加GitHub到known_hosts
-                        ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null || true
-                        
-                        # 配置Git使用此SSH密钥
-                        export GIT_SSH_COMMAND="ssh -i ~/.ssh/github_key -o StrictHostKeyChecking=no"
-                        
-                        # 克隆仓库
-                        git clone -b ${GIT_REF} ${GIT_REPO} .
-                    '''
-                }
-                
-                // 显示当前提交信息
+                // 使用参数指定的分支或tag进行检出
                 script {
-                    def gitCommit = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
-                    def gitAuthor = sh(returnStdout: true, script: 'git log -1 --pretty=format:"%an"').trim()
-                    def gitMessage = sh(returnStdout: true, script: 'git log -1 --pretty=format:"%s"').trim()
-                    echo "提交ID: ${gitCommit}"
-                    echo "提交作者: ${gitAuthor}"
-                    echo "提交信息: ${gitMessage}"
-                }
+                    def branchOrTag = params.BRANCH_OR_TAG ?: 'origin/dev'
+                    echo "🎯 准备检出: ${branchOrTag}"
+                    
+                    // 首先clone仓库
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: branchOrTag]],
+                        doGenerateSubmoduleConfigurations: false,
+                        extensions: [
+                            [$class: 'CleanBeforeCheckout'],
+                            [$class: 'CloneOption', noTags: false, shallow: false, timeout: 10]
+                        ],
+                        submoduleCfg: [],
+                        userRemoteConfigs: [[
+                            credentialsId: 'github-ssh-key',
+                            url: env.GIT_REPO
+                        ]]
+                    ])
+                    
+                    // 检测当前检出的类型和信息
+                    def currentBranch = ""
+                    def currentTag = ""
+                    def commitHash = ""
+                    
+                    try {
+                        // 获取当前commit hash
+                        commitHash = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
+                        echo "📝 Commit: ${commitHash.take(8)}"
+                    } catch (Exception e) {
+                        echo "无法获取commit hash: ${e.getMessage()}"
+                    }
+                    
+                    try {
+                        // 尝试获取当前分支名
+                        currentBranch = sh(returnStdout: true, script: 'git rev-parse --abbrev-ref HEAD').trim()
+                        if (currentBranch != 'HEAD') {
+                            echo "🌿 当前分支: ${currentBranch}"
+                        }
+                    } catch (Exception e) {
+                        echo "无法获取分支名: ${e.getMessage()}"
+                    }
+                    
+                    try {
+                        // 尝试获取当前tag（如果存在）
+                        def tagInfo = sh(returnStdout: true, script: 'git describe --tags --exact-match HEAD 2>/dev/null || echo ""').trim()
+                        if (tagInfo) {
+                            currentTag = tagInfo
+                            echo "🏷️  当前标签: ${currentTag}"
+                        } else {
+                            echo "ℹ️  当前提交没有对应的标签"
+                        }
+                    } catch (Exception e) {
+                        echo "标签检测: ${e.getMessage()}"
+                    }
+                    
+                    // 显示检出总结
+                    echo "✅ 代码检出完成"
+                    echo "📦 检出目标: ${branchOrTag}"
+                    if (currentBranch && currentBranch != 'HEAD') {
+                        echo "📍 实际分支: ${currentBranch}"
+                    }
+                    if (currentTag) {
+                        echo "📍 实际标签: ${currentTag}"
+                    }
+                    if (commitHash) {
+                        echo "📍 提交哈希: ${commitHash.take(8)}"
+                    }
+                }     
+     
             }
         }
         
