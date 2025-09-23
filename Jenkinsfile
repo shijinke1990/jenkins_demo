@@ -1,15 +1,7 @@
 pipeline {
     agent any
     
-    // 添加参数配置，支持选择分支或tag
-    parameters {
-        string(
-            name: 'BRANCH_OR_TAG',
-            defaultValue: 'origin/dev',
-            description: '请输入要构建的分支或tag名称（例如：origin/dev, origin/main, v1.0.0, v1.1.0等）',
-            trim: true
-        )
-    }
+    // 使用现有的中文参数配置
     
     environment {
         // GitHub仓库配置 - 使用SSH方式
@@ -31,7 +23,7 @@ pipeline {
             steps {
                 echo '开始从GitHub检出代码...'
                 echo "仓库地址: ${GIT_REPO}"
-                echo "目标分支/标签: ${params.BRANCH_OR_TAG}"
+                echo "目标分支/标签: ${params['选择标签或分支']}"
                 
                 // 清理工作空间
                 deleteDir()
@@ -40,14 +32,13 @@ pipeline {
                 script {
                     // 参数调试信息
                     echo "🔍 参数调试信息:"
-                    echo "  - params.BRANCH_OR_TAG: ${params.BRANCH_OR_TAG}"
+                    echo "  - 选择标签或分支: ${params['选择标签或分支']}"
                     echo "  - params对象: ${params}"
                     
-                    def branchOrTag = params.BRANCH_OR_TAG
+                    def branchOrTag = params['选择标签或分支']
                     if (!branchOrTag || branchOrTag.trim() == "") {
                         branchOrTag = 'origin/dev'
                         echo "⚠️  参数为空，使用默认值: ${branchOrTag}"
-                        echo "ℹ️  如果这是第一次构建，请重新运行构建以使用您选择的参数"
                     } else {
                         echo "✅ 使用用户指定的参数: ${branchOrTag}"
                     }
