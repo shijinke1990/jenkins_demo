@@ -429,7 +429,7 @@ pipeline {
                 } else {
                     bat 'del /Q build*.tar.gz build*.zip 2>nul || echo "清理完成"'
                 }
-                echo '清理完成nimabni
+                echo '清理完成nimabni'
             }
         }
     }
