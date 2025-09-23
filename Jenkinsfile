@@ -175,17 +175,19 @@ pipeline {
                     if (isUnix()) {
                         sh '''
                             TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-                            tar -czf "dist-${TIMESTAMP}.tar.gz" dist/
+                            # 打包dist文件夹的内容，而不是dist文件夹本身
+                            cd dist && tar -czf "../dist-${TIMESTAMP}.tar.gz" . && cd ..
                             ln -sf "dist-${TIMESTAMP}.tar.gz" dist.tar.gz
-                            echo "构建包: dist-${TIMESTAMP}.tar.gz"
+                            echo "构建包: dist-${TIMESTAMP}.tar.gz（包含dist文件夹的内容）"
                         '''
                     } else {
                         // Windows环境使用PowerShell压缩
                         powershell '''
                             $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+                            # 压缩dist文件夹的内容，而不是dist文件夹本身
                             Compress-Archive -Path .\\dist\\* -DestinationPath "dist-$timestamp.zip" -Force
                             Copy-Item "dist-$timestamp.zip" -Destination "dist.zip" -Force
-                            Write-Host "构建包: dist-$timestamp.zip"
+                            Write-Host "构建包: dist-$timestamp.zip（包含dist文件夹的内容）"
                         '''
                     }
                 }
@@ -221,11 +223,17 @@ pipeline {
                                     mkdir -p ${DEPLOY_PATH}
                                     
                                     # 备份现有的部署（如果存在）
-                                    if [ -d "${DEPLOY_PATH}/dist" ]; then
+                                    if [ -f "${DEPLOY_PATH}/index.html" ] || [ -d "${DEPLOY_PATH}/assets" ]; then
                                         echo "📦 备份现有部署..."
-                                        BACKUP_NAME="backup-\$(date +%Y%m%d-%H%M%S)"
-                                        mv "${DEPLOY_PATH}/dist" "${DEPLOY_PATH}/\$BACKUP_NAME" 2>/dev/null || true
-                                        echo "✅ 备份完成: ${DEPLOY_PATH}/\$BACKUP_NAME"
+                                        BACKUP_DIR="${DEPLOY_PATH}/../backup-\$(date +%Y%m%d-%H%M%S)"
+                                        mkdir -p "\$BACKUP_DIR"
+                                        # 备份现有文件到备份目录
+                                        cp -rf ${DEPLOY_PATH}/* "\$BACKUP_DIR/" 2>/dev/null || true
+                                        echo "✅ 备份完成: \$BACKUP_DIR"
+                                        
+                                        # 清空目标目录，准备新部署
+                                        echo "🧹 清理目标目录..."
+                                        rm -rf ${DEPLOY_PATH}/*
                                     fi
                                     
                                     # 解压前端构建产物到目标目录
@@ -236,18 +244,22 @@ pipeline {
                                     
                                     # 设置正确的文件权限
                                     echo "🔧 设置文件权限..."
-                                    chown -R www-data:www-data ${DEPLOY_PATH}/dist 2>/dev/null || chown -R nginx:nginx ${DEPLOY_PATH}/dist 2>/dev/null || true
-                                    find ${DEPLOY_PATH}/dist -type f -exec chmod 644 {} \\;
-                                    find ${DEPLOY_PATH}/dist -type d -exec chmod 755 {} \\;
+                                    chown -R www-data:www-data ${DEPLOY_PATH} 2>/dev/null || chown -R nginx:nginx ${DEPLOY_PATH} 2>/dev/null || true
+                                    find ${DEPLOY_PATH} -type f -exec chmod 644 {} \\;
+                                    find ${DEPLOY_PATH} -type d -exec chmod 755 {} \\;
                                     echo "✅ 文件权限设置完成"
                                     
                                     # 检查部署文件
-                                    if [ -f "${DEPLOY_PATH}/dist/index.html" ]; then
+                                    if [ -f "${DEPLOY_PATH}/index.html" ]; then
                                         echo "✅ 部署文件验证成功"
-                                        echo "文件数量: \$(find ${DEPLOY_PATH}/dist -type f | wc -l)"
-                                        echo "目录大小: \$(du -sh ${DEPLOY_PATH}/dist | cut -f1)"
+                                        echo "文件数量: \$(find ${DEPLOY_PATH} -type f | wc -l)"
+                                        echo "目录大小: \$(du -sh ${DEPLOY_PATH} | cut -f1)"
+                                        echo "📁 部署结构预览:"
+                                        ls -la ${DEPLOY_PATH}/ | head -10
                                     else
                                         echo "❌ 部署文件验证失败，未找到index.html"
+                                        echo "目录内容:"
+                                        ls -la ${DEPLOY_PATH}/
                                         exit 1
                                     fi
                                     
@@ -256,12 +268,13 @@ pipeline {
                                     
                                     # 清理旧备份（保留最近3个备份）
                                     echo "🧹 清理旧备份..."
-                                    cd ${DEPLOY_PATH}
+                                    cd ${DEPLOY_PATH}/..
                                     ls -dt backup-* 2>/dev/null | tail -n +4 | xargs rm -rf 2>/dev/null || true
                                     
                                     echo "✅ 部署完成！"
-                                    echo "🌐 部署路径: ${DEPLOY_PATH}/dist"
-                                    echo "📁 项目文件已部署到服务器"
+                                    echo "🌐 部署路径: ${DEPLOY_PATH}"
+                                    echo "📁 项目文件已直接部署到目标目录"
+                                    echo "🎯 dist文件夹内容已解压至: ${DEPLOY_PATH}"
                                 '
                             """
                         } else {
@@ -292,35 +305,37 @@ pipeline {
                                 echo "=== 部署状态检查 ==="
                                 
                                 # 检查部署目录
-                                if [ -d "${DEPLOY_PATH}/dist" ]; then
-                                    echo "✅ 部署目录存在: ${DEPLOY_PATH}/dist"
-                                    echo "文件数量: \$(find ${DEPLOY_PATH}/dist -type f | wc -l)"
-                                    echo "目录大小: \$(du -sh ${DEPLOY_PATH}/dist | cut -f1)"
+                                if [ -d "${DEPLOY_PATH}" ]; then
+                                    echo "✅ 部署目录存在: ${DEPLOY_PATH}"
+                                    echo "文件数量: \$(find ${DEPLOY_PATH} -type f | wc -l)"
+                                    echo "目录大小: \$(du -sh ${DEPLOY_PATH} | cut -f1)"
                                 else
                                     echo "❌ 部署目录不存在"
                                     exit 1
                                 fi
                                 
                                 # 检查关键文件
-                                if [ -f "${DEPLOY_PATH}/dist/index.html" ]; then
+                                if [ -f "${DEPLOY_PATH}/index.html" ]; then
                                     echo "✅ 入口文件存在: index.html"
-                                    echo "文件大小: \$(ls -lh ${DEPLOY_PATH}/dist/index.html | awk \"{print \\\$5}\")"
+                                    echo "文件大小: \$(ls -lh ${DEPLOY_PATH}/index.html | awk \"{print \\\$5}\")"
                                 else
                                     echo "❌ 入口文件不存在"
+                                    echo "目录内容:"
+                                    ls -la ${DEPLOY_PATH}/
                                     exit 1
                                 fi
                                 
                                 # 检查静态资源目录
-                                if [ -d "${DEPLOY_PATH}/dist/assets" ]; then
+                                if [ -d "${DEPLOY_PATH}/assets" ]; then
                                     echo "✅ 静态资源目录存在"
-                                    echo "静态资源文件数量: \$(find ${DEPLOY_PATH}/dist/assets -type f | wc -l)"
+                                    echo "静态资源文件数量: \$(find ${DEPLOY_PATH}/assets -type f | wc -l)"
                                 else
                                     echo "ℹ️ 静态资源目录不存在（可能使用其他目录结构）"
                                 fi
                                 
                                 # 检查文件权限
                                 echo "📋 文件权限检查:"
-                                ls -la ${DEPLOY_PATH}/dist/ | head -5
+                                ls -la ${DEPLOY_PATH}/ | head -5
                                 
                                 # 检查Web服务器状态（如果存在）
                                 if command -v nginx >/dev/null 2>&1; then
