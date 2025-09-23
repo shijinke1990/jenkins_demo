@@ -9,7 +9,7 @@ pipeline {
         // 阿里云服务器配置  
         ALIYUN_HOST = '120.55.61.109'
         ALIYUN_USER = 'root'
-        DEPLOY_PATH = '/var/www/html/dist'
+        DEPLOY_PATH = '/var/www/html'
         NODE_VERSION = '22'
     }
     
@@ -175,19 +175,19 @@ pipeline {
                     if (isUnix()) {
                         sh '''
                             TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-                            # 打包dist文件夹的内容，而不是dist文件夹本身
-                            cd dist && tar -czf "../dist-${TIMESTAMP}.tar.gz" . && cd ..
+                            # 打包dist文件夹本身
+                            tar -czf "dist-${TIMESTAMP}.tar.gz" dist
                             ln -sf "dist-${TIMESTAMP}.tar.gz" dist.tar.gz
-                            echo "构建包: dist-${TIMESTAMP}.tar.gz（包含dist文件夹的内容）"
+                            echo "构建包: dist-${TIMESTAMP}.tar.gz（包含dist文件夹）"
                         '''
                     } else {
                         // Windows环境使用PowerShell压缩
                         powershell '''
                             $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-                            # 压缩dist文件夹的内容，而不是dist文件夹本身
-                            Compress-Archive -Path .\\dist\\* -DestinationPath "dist-$timestamp.zip" -Force
+                            # 压缩dist文件夹本身
+                            Compress-Archive -Path .\\dist -DestinationPath "dist-$timestamp.zip" -Force
                             Copy-Item "dist-$timestamp.zip" -Destination "dist.zip" -Force
-                            Write-Host "构建包: dist-$timestamp.zip（包含dist文件夹的内容）"
+                            Write-Host "构建包: dist-$timestamp.zip（包含dist文件夹）"
                         '''
                     }
                 }
@@ -238,7 +238,7 @@ pipeline {
                                     
                                     # 解压前端构建产物到目标目录
                                     echo "📦 解压构建产物到目标目录..."
-                                    cd ${DEPLOY_PATH}
+                                    cd ${DEPLOY_PATH}/..
                                     tar -xzf /tmp/dist.tar.gz
                                     echo "✅ 构建产物部署完成"
                                     
@@ -273,8 +273,7 @@ pipeline {
                                     
                                     echo "✅ 部署完成！"
                                     echo "🌐 部署路径: ${DEPLOY_PATH}"
-                                    echo "📁 项目文件已直接部署到目标目录"
-                                    echo "🎯 dist文件夹内容已解压至: ${DEPLOY_PATH}"
+                                    echo "📁 dist文件夹已解压到目标位置"
                                 '
                             """
                         } else {
