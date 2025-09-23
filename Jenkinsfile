@@ -38,8 +38,20 @@ pipeline {
                 
                 // 使用参数指定的分支或tag进行检出
                 script {
-                    def branchOrTag = params.BRANCH_OR_TAG ?: 'origin/dev'
-                    echo "🎯 准备检出: ${branchOrTag}"
+                    // 参数调试信息
+                    echo "🔍 参数调试信息:"
+                    echo "  - params.BRANCH_OR_TAG: ${params.BRANCH_OR_TAG}"
+                    echo "  - params对象: ${params}"
+                    
+                    def branchOrTag = params.BRANCH_OR_TAG
+                    if (!branchOrTag || branchOrTag.trim() == "") {
+                        branchOrTag = 'origin/dev'
+                        echo "⚠️  参数为空，使用默认值: ${branchOrTag}"
+                        echo "ℹ️  如果这是第一次构建，请重新运行构建以使用您选择的参数"
+                    } else {
+                        echo "✅ 使用用户指定的参数: ${branchOrTag}"
+                    }
+                    echo "🎯 最终检出目标: ${branchOrTag}"
                     
                     // 首先clone仓库
                     checkout([
