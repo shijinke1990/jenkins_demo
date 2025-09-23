@@ -9,7 +9,7 @@ pipeline {
         // 阿里云服务器配置  
         ALIYUN_HOST = '120.55.61.109'
         ALIYUN_USER = 'root'
-        DEPLOY_PATH = '/var/www'
+        DEPLOY_PATH = '/var/www/html'
         NODE_VERSION = '22'
     }
     
@@ -223,45 +223,47 @@ pipeline {
                                     mkdir -p ${DEPLOY_PATH}
                                     
                                     # 备份现有的部署（如果存在）
-                                    if [ -f "${DEPLOY_PATH}/html/index.html" ] || [ -d "${DEPLOY_PATH}/html/assets" ]; then
+                                    if [ -f "${DEPLOY_PATH}/index.html" ] || [ -d "${DEPLOY_PATH}/assets" ]; then
                                         echo "📦 备份现有部署..."
-                                        BACKUP_DIR="${DEPLOY_PATH}/backup-\$(date +%Y%m%d-%H%M%S)"
+                                        BACKUP_DIR="${DEPLOY_PATH}/../backup-\$(date +%Y%m%d-%H%M%S)"
                                         mkdir -p "\$BACKUP_DIR"
-                                        # 备份现有html目录到备份目录
-                                        cp -rf ${DEPLOY_PATH}/html "\$BACKUP_DIR/" 2>/dev/null || true
+                                        # 备份现有文件到备份目录
+                                        cp -rf ${DEPLOY_PATH}/* "\$BACKUP_DIR/" 2>/dev/null || true
                                         echo "✅ 备份完成: \$BACKUP_DIR"
                                         
-                                        # 清空html目录，准备新部署
-                                        echo "🧹 清理html目录..."
-                                        rm -rf ${DEPLOY_PATH}/html
+                                        # 清空目标目录，准备新部署
+                                        echo "🧹 清理目标目录..."
+                                        rm -rf ${DEPLOY_PATH}/*
                                     fi
                                     
                                     # 解压前端构建产物到目标目录
                                     echo "📦 解压构建产物到目标目录..."
-                                    cd ${DEPLOY_PATH}
+                                    cd /tmp
                                     tar -xzf /tmp/dist.tar.gz
-                                    # 将解压出的dist目录重命名为html
-                                    mv dist html
+                                    # 将dist目录内容移动到目标目录
+                                    mv dist/* ${DEPLOY_PATH}/
+                                    # 清理临时dist目录
+                                    rm -rf /tmp/dist
                                     echo "✅ 构建产物部署完成"
                                     
                                     # 设置正确的文件权限
                                     echo "🔧 设置文件权限..."
-                                    chown -R www-data:www-data ${DEPLOY_PATH}/html 2>/dev/null || chown -R nginx:nginx ${DEPLOY_PATH}/html 2>/dev/null || true
-                                    find ${DEPLOY_PATH}/html -type f -exec chmod 644 {} \\;
-                                    find ${DEPLOY_PATH}/html -type d -exec chmod 755 {} \\;
+                                    chown -R www-data:www-data ${DEPLOY_PATH} 2>/dev/null || chown -R nginx:nginx ${DEPLOY_PATH} 2>/dev/null || true
+                                    find ${DEPLOY_PATH} -type f -exec chmod 644 {} \\;
+                                    find ${DEPLOY_PATH} -type d -exec chmod 755 {} \\;
                                     echo "✅ 文件权限设置完成"
                                     
                                     # 检查部署文件
-                                    if [ -f "${DEPLOY_PATH}/html/index.html" ]; then
+                                    if [ -f "${DEPLOY_PATH}/index.html" ]; then
                                         echo "✅ 部署文件验证成功"
-                                        echo "文件数量: \$(find ${DEPLOY_PATH}/html -type f | wc -l)"
-                                        echo "目录大小: \$(du -sh ${DEPLOY_PATH}/html | cut -f1)"
+                                        echo "文件数量: \$(find ${DEPLOY_PATH} -type f | wc -l)"
+                                        echo "目录大小: \$(du -sh ${DEPLOY_PATH} | cut -f1)"
                                         echo "📁 部署结构预览:"
-                                        ls -la ${DEPLOY_PATH}/html/ | head -10
+                                        ls -la ${DEPLOY_PATH}/ | head -10
                                     else
                                         echo "❌ 部署文件验证失败，未找到index.html"
                                         echo "目录内容:"
-                                        ls -la ${DEPLOY_PATH}/html/
+                                        ls -la ${DEPLOY_PATH}/
                                         exit 1
                                     fi
                                     
@@ -270,12 +272,12 @@ pipeline {
                                     
                                     # 清理旧备份（保留最近3个备份）
                                     echo "🧹 清理旧备份..."
-                                    cd ${DEPLOY_PATH}
+                                    cd ${DEPLOY_PATH}/..
                                     ls -dt backup-* 2>/dev/null | tail -n +4 | xargs rm -rf 2>/dev/null || true
                                     
                                     echo "✅ 部署完成！"
-                                    echo "🌐 部署路径: ${DEPLOY_PATH}/html"
-                                    echo "📁 dist文件夹已解压并重命名为html目录"
+                                    echo "🌐 部署路径: ${DEPLOY_PATH}"
+                                    echo "📁 dist内容已直接部署到目标目录"
                                 '
                             """
                         } else {
@@ -306,37 +308,37 @@ pipeline {
                                 echo "=== 部署状态检查 ==="
                                 
                                 # 检查部署目录
-                                if [ -d "${DEPLOY_PATH}/html" ]; then
-                                    echo "✅ 部署目录存在: ${DEPLOY_PATH}/html"
-                                    echo "文件数量: \$(find ${DEPLOY_PATH}/html -type f | wc -l)"
-                                    echo "目录大小: \$(du -sh ${DEPLOY_PATH}/html | cut -f1)"
+                                if [ -d "${DEPLOY_PATH}" ]; then
+                                    echo "✅ 部署目录存在: ${DEPLOY_PATH}"
+                                    echo "文件数量: \$(find ${DEPLOY_PATH} -type f | wc -l)"
+                                    echo "目录大小: \$(du -sh ${DEPLOY_PATH} | cut -f1)"
                                 else
                                     echo "❌ 部署目录不存在"
                                     exit 1
                                 fi
                                 
                                 # 检查关键文件
-                                if [ -f "${DEPLOY_PATH}/html/index.html" ]; then
+                                if [ -f "${DEPLOY_PATH}/index.html" ]; then
                                     echo "✅ 入口文件存在: index.html"
-                                    echo "文件大小: \$(ls -lh ${DEPLOY_PATH}/html/index.html | awk \"{print \\\$5}\")"
+                                    echo "文件大小: \$(ls -lh ${DEPLOY_PATH}/index.html | awk \"{print \\\$5}\")"
                                 else
                                     echo "❌ 入口文件不存在"
                                     echo "目录内容:"
-                                    ls -la ${DEPLOY_PATH}/html/
+                                    ls -la ${DEPLOY_PATH}/
                                     exit 1
                                 fi
                                 
                                 # 检查静态资源目录
-                                if [ -d "${DEPLOY_PATH}/html/assets" ]; then
+                                if [ -d "${DEPLOY_PATH}/assets" ]; then
                                     echo "✅ 静态资源目录存在"
-                                    echo "静态资源文件数量: \$(find ${DEPLOY_PATH}/html/assets -type f | wc -l)"
+                                    echo "静态资源文件数量: \$(find ${DEPLOY_PATH}/assets -type f | wc -l)"
                                 else
                                     echo "ℹ️ 静态资源目录不存在（可能使用其他目录结构）"
                                 fi
                                 
                                 # 检查文件权限
                                 echo "📋 文件权限检查:"
-                                ls -la ${DEPLOY_PATH}/html/ | head -5
+                                ls -la ${DEPLOY_PATH}/ | head -5
                                 
                                 # 检查Web服务器状态（如果存在）
                                 if command -v nginx >/dev/null 2>&1; then
