@@ -2,10 +2,17 @@ pipeline {
     agent any
     
     parameters {
-        choice(
+        gitParameter(
             name: 'GIT_REF',
-            choices: ['main', 'develop', 'release', 'feature'],
-            description: '选择要构建的分支'
+            type: 'PT_BRANCH_TAG',
+            defaultValue: 'main',
+            description: '选择要构建的分支或Tag',
+            branchFilter: '.*',
+            tagFilter: '.*',
+            sortMode: 'DESCENDING_SMART',
+            selectedValue: 'DEFAULT',
+            quickFilterEnabled: true,
+            useRepository: 'git@github.com:shijinke1990/jenkins_demo.git'
         )
     }
     
