@@ -1,5 +1,16 @@
 pipeline {
     agent any
+    
+    // 添加参数配置，支持选择分支或tag
+    parameters {
+        string(
+            name: 'BRANCH_OR_TAG',
+            defaultValue: 'origin/dev',
+            description: '请输入要构建的分支或tag名称（例如：origin/dev, origin/main, v1.0.0, v1.1.0等）',
+            trim: true
+        )
+    }
+    
     environment {
         // GitHub仓库配置 - 使用SSH方式
         GIT_REPO = 'git@github.com:shijinke1990/jenkins_demo.git'
@@ -20,23 +31,51 @@ pipeline {
             steps {
                 echo '开始从GitHub检出代码...'
                 echo "仓库地址: ${GIT_REPO}"
+                echo "目标分支/标签: ${params.BRANCH_OR_TAG}"
                 
                 // 清理工作空间
                 deleteDir()
                 
-                // 使用Jenkins内置的checkout，自动检出触发构建的分支/tag
+                // 使用参数指定的分支或tag进行检出
                 script {
-                    // 检出代码
-                    checkout scm
+                    def branchOrTag = params.BRANCH_OR_TAG ?: 'origin/dev'
+                    echo "🎯 准备检出: ${branchOrTag}"
                     
-                    // 自动检测当前分支或tag
+                    // 首先clone仓库
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: branchOrTag]],
+                        doGenerateSubmoduleConfigurations: false,
+                        extensions: [
+                            [$class: 'CleanBeforeCheckout'],
+                            [$class: 'CloneOption', noTags: false, shallow: false, timeout: 10]
+                        ],
+                        submoduleCfg: [],
+                        userRemoteConfigs: [[
+                            credentialsId: 'github-ssh-key',
+                            url: env.GIT_REPO
+                        ]]
+                    ])
+                    
+                    // 检测当前检出的类型和信息
                     def currentBranch = ""
                     def currentTag = ""
+                    def commitHash = ""
+                    
+                    try {
+                        // 获取当前commit hash
+                        commitHash = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
+                        echo "📝 Commit: ${commitHash.take(8)}"
+                    } catch (Exception e) {
+                        echo "无法获取commit hash: ${e.getMessage()}"
+                    }
                     
                     try {
                         // 尝试获取当前分支名
                         currentBranch = sh(returnStdout: true, script: 'git rev-parse --abbrev-ref HEAD').trim()
-                        echo "🌿 检测到分支: ${currentBranch}"
+                        if (currentBranch != 'HEAD') {
+                            echo "🌿 当前分支: ${currentBranch}"
+                        }
                     } catch (Exception e) {
                         echo "无法获取分支名: ${e.getMessage()}"
                     }
@@ -46,46 +85,28 @@ pipeline {
                         def tagInfo = sh(returnStdout: true, script: 'git describe --tags --exact-match HEAD 2>/dev/null || echo ""').trim()
                         if (tagInfo) {
                             currentTag = tagInfo
-                            echo "🏷️  检测到标签: ${currentTag}"
+                            echo "🏷️  当前标签: ${currentTag}"
+                        } else {
+                            echo "ℹ️  当前提交没有对应的标签"
                         }
                     } catch (Exception e) {
-                        // 如果没有tag，这是正常的
-                        echo "当前提交没有对应的标签"
+                        echo "标签检测: ${e.getMessage()}"
                     }
                     
-                    // 设置环境变量
+                    // 显示检出总结
+                    echo "✅ 代码检出完成"
+                    echo "📦 检出目标: ${branchOrTag}"
+                    if (currentBranch && currentBranch != 'HEAD') {
+                        echo "📍 实际分支: ${currentBranch}"
+                    }
                     if (currentTag) {
-                        env.GIT_REF = currentTag
-                        env.BUILD_TYPE = "Tag"
-                        echo "✅ 将使用标签进行构建: ${env.GIT_REF}"
-                    } else if (currentBranch && currentBranch != "HEAD") {
-                        env.GIT_REF = currentBranch  
-                        env.BUILD_TYPE = "Branch"
-                        echo "✅ 将使用分支进行构建: ${env.GIT_REF}"
-                    } else {
-                        // 回退到环境变量或默认值
-                        env.GIT_REF = env.BRANCH_NAME ?: "main"
-                        env.BUILD_TYPE = "Branch"
-                        echo "⚠️  使用默认分支: ${env.GIT_REF}"
+                        echo "📍 实际标签: ${currentTag}"
                     }
-                }
-                
-                // 显示当前提交信息
-                script {
-                    def gitCommit = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
-                    def gitAuthor = sh(returnStdout: true, script: 'git log -1 --pretty=format:"%an"').trim()
-                    def gitMessage = sh(returnStdout: true, script: 'git log -1 --pretty=format:"%s"').trim()
-                    def buildInfo = sh(returnStdout: true, script: 'git log -1 --pretty=format:"%ad" --date=format:"%Y-%m-%d %H:%M:%S"').trim()
-                    
-                    echo "=== 📋 构建信息 ==="
-                    echo "构建类型: ${env.BUILD_TYPE}"
-                    echo "分支/标签: ${env.GIT_REF}"
-                    echo "提交ID: ${gitCommit}"
-                    echo "提交作者: ${gitAuthor}" 
-                    echo "提交信息: ${gitMessage}"
-                    echo "提交时间: ${buildInfo}"
-                    echo "=================="
-                }
+                    if (commitHash) {
+                        echo "📍 提交哈希: ${commitHash.take(8)}"
+                    }
+                }     
+     
             }
         }
         
