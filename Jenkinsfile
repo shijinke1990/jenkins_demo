@@ -3,7 +3,6 @@ pipeline {
     environment {
         // GitHub仓库配置 - 使用SSH方式
         GIT_REPO = 'git@github.com:shijinke1990/jenkins_demo.git'
-        GIT_BRANCH = 'main'
         // 阿里云服务器配置  
         ALIYUN_HOST = '120.55.61.109'
         ALIYUN_USER = 'root'
@@ -21,35 +20,54 @@ pipeline {
             steps {
                 echo '开始从GitHub检出代码...'
                 echo "仓库地址: ${GIT_REPO}"
-                script {
-                    env.GIT_REF = params.GIT_REF ?: GIT_BRANCH
-                }
-                echo "分支/Tag: ${env.GIT_REF}"
                 
                 // 清理工作空间
                 deleteDir()
                 
-                // 使用withCredentials以SSH方式从GitHub检出代码
-                withCredentials([sshUserPrivateKey(
-                    credentialsId: 'github-ssh-key', // 使用您的GitHub SSH凭据 ID
-                    keyFileVariable: 'SSH_KEY',
-                    usernameVariable: 'SSH_USER'
-                )]) {
-                    sh '''
-                        # 配置SSH环境
-                        mkdir -p ~/.ssh
-                        cp "$SSH_KEY" ~/.ssh/github_key
-                        chmod 600 ~/.ssh/github_key
-                        
-                        # 添加GitHub到known_hosts
-                        ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null || true
-                        
-                        # 配置Git使用此SSH密钥
-                        export GIT_SSH_COMMAND="ssh -i ~/.ssh/github_key -o StrictHostKeyChecking=no"
-                        
-                        # 克隆仓库
-                        git clone -b ${GIT_REF} ${GIT_REPO} .
-                    '''
+                // 使用Jenkins内置的checkout，自动检出触发构建的分支/tag
+                script {
+                    // 检出代码
+                    checkout scm
+                    
+                    // 自动检测当前分支或tag
+                    def currentBranch = ""
+                    def currentTag = ""
+                    
+                    try {
+                        // 尝试获取当前分支名
+                        currentBranch = sh(returnStdout: true, script: 'git rev-parse --abbrev-ref HEAD').trim()
+                        echo "🌿 检测到分支: ${currentBranch}"
+                    } catch (Exception e) {
+                        echo "无法获取分支名: ${e.getMessage()}"
+                    }
+                    
+                    try {
+                        // 尝试获取当前tag（如果存在）
+                        def tagInfo = sh(returnStdout: true, script: 'git describe --tags --exact-match HEAD 2>/dev/null || echo ""').trim()
+                        if (tagInfo) {
+                            currentTag = tagInfo
+                            echo "🏷️  检测到标签: ${currentTag}"
+                        }
+                    } catch (Exception e) {
+                        // 如果没有tag，这是正常的
+                        echo "当前提交没有对应的标签"
+                    }
+                    
+                    // 设置环境变量
+                    if (currentTag) {
+                        env.GIT_REF = currentTag
+                        env.BUILD_TYPE = "Tag"
+                        echo "✅ 将使用标签进行构建: ${env.GIT_REF}"
+                    } else if (currentBranch && currentBranch != "HEAD") {
+                        env.GIT_REF = currentBranch  
+                        env.BUILD_TYPE = "Branch"
+                        echo "✅ 将使用分支进行构建: ${env.GIT_REF}"
+                    } else {
+                        // 回退到环境变量或默认值
+                        env.GIT_REF = env.BRANCH_NAME ?: "main"
+                        env.BUILD_TYPE = "Branch"
+                        echo "⚠️  使用默认分支: ${env.GIT_REF}"
+                    }
                 }
                 
                 // 显示当前提交信息
@@ -57,9 +75,16 @@ pipeline {
                     def gitCommit = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
                     def gitAuthor = sh(returnStdout: true, script: 'git log -1 --pretty=format:"%an"').trim()
                     def gitMessage = sh(returnStdout: true, script: 'git log -1 --pretty=format:"%s"').trim()
+                    def buildInfo = sh(returnStdout: true, script: 'git log -1 --pretty=format:"%ad" --date=format:"%Y-%m-%d %H:%M:%S"').trim()
+                    
+                    echo "=== 📋 构建信息 ==="
+                    echo "构建类型: ${env.BUILD_TYPE}"
+                    echo "分支/标签: ${env.GIT_REF}"
                     echo "提交ID: ${gitCommit}"
-                    echo "提交作者: ${gitAuthor}"
+                    echo "提交作者: ${gitAuthor}" 
                     echo "提交信息: ${gitMessage}"
+                    echo "提交时间: ${buildInfo}"
+                    echo "=================="
                 }
             }
         }
