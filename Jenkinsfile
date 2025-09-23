@@ -222,32 +222,22 @@ pipeline {
                                     # 创建部署目录
                                     mkdir -p ${DEPLOY_PATH}
                                     
-                                    # 备份现有的部署（如果目录不为空）
-                                    if [ "\$(ls -A ${DEPLOY_PATH} 2>/dev/null)" ]; then
-                                        echo "📦 备份现有部署..."
-                                        BACKUP_DIR="${DEPLOY_PATH}/../backup-\$(date +%Y%m%d-%H%M%S)"
-                                        mkdir -p "\$BACKUP_DIR"
-                                        # 备份现有文件到备份目录
-                                        cp -rf ${DEPLOY_PATH}/* "\$BACKUP_DIR/" 2>/dev/null || true
-                                        echo "✅ 备份完成: \$BACKUP_DIR"
-                                        
-                                        # 清空目标目录，准备新部署
-                                        echo "🧹 清理目标目录..."
-                                        rm -rf ${DEPLOY_PATH}/*
-                                        echo "✅ 目标目录已清空"
-                                    else
-                                        echo "ℹ️  目标目录为空，无需备份"
-                                    fi
+                                    # 清空目标目录，准备新部署
+                                    echo "🧹 清理目标目录..."
+                                    rm -rf ${DEPLOY_PATH}/*
+                                    echo "✅ 目标目录已清空"
                                     
-                                    # 解压前端构建产物到目标目录
+                                    # 解压构建产物并直接部署到目标目录
                                     echo "📦 解压构建产物到目标目录..."
                                     cd /tmp
                                     tar -xzf /tmp/dist.tar.gz
-                                    # 将dist目录内容复制到目标目录（包括隐藏文件）
-                                    cp -r dist/. ${DEPLOY_PATH}/
+                                    # 将dist目录的内容直接复制到目标目录（不保留dist目录层级）
+                                    cp -r dist/* ${DEPLOY_PATH}/
+                                    # 复制隐藏文件（如果有）
+                                    cp -r dist/.* ${DEPLOY_PATH}/ 2>/dev/null || true
                                     # 清理临时dist目录
                                     rm -rf /tmp/dist
-                                    echo "✅ 构建产物部署完成"
+                                    echo "✅ 构建产物直接部署到 ${DEPLOY_PATH} 完成"
                                     
                                     # 设置正确的文件权限
                                     echo "🔧 设置文件权限..."
@@ -273,14 +263,9 @@ pipeline {
                                     # 清理临时文件
                                     rm -f /tmp/dist.tar.gz
                                     
-                                    # 清理旧备份（保留最近3个备份）
-                                    echo "🧹 清理旧备份..."
-                                    cd ${DEPLOY_PATH}/..
-                                    ls -dt backup-* 2>/dev/null | tail -n +4 | xargs rm -rf 2>/dev/null || true
-                                    
                                     echo "✅ 部署完成！"
                                     echo "🌐 部署路径: ${DEPLOY_PATH}"
-                                    echo "📁 dist内容已直接部署到目标目录"
+                                    echo "📁 构建产物已直接部署到 Nginx 根目录"
                                 '
                             """
                         } else {
