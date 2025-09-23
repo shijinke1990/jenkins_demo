@@ -9,7 +9,7 @@ pipeline {
         // 阿里云服务器配置  
         ALIYUN_HOST = '120.55.61.109'
         ALIYUN_USER = 'root'
-        DEPLOY_PATH = '/var/www/html'
+        DEPLOY_PATH = '/var/www/demo.boluobo.com'
         NODE_VERSION = '22'
     }
     
@@ -215,7 +215,7 @@ pipeline {
                                 
                                 # 连接服务器并执行部署
                                 ssh -i ~/.ssh/aliyun_key -o StrictHostKeyChecking=no ${ALIYUN_USER}@${ALIYUN_HOST} '
-                                    echo "开始部署到/var/www/html..."
+                                    echo "开始部署到/var/www/demo.boluobo.com..."
                                     
                                     # 创建部署目录
                                     mkdir -p ${DEPLOY_PATH}
