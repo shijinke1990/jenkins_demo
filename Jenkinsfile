@@ -1,21 +1,5 @@
 pipeline {
     agent any
-    
-    parameters {
-        gitParameter(
-            name: 'GIT_REF',
-            type: 'PT_BRANCH_TAG',
-            defaultValue: 'main',
-            description: '选择要构建的分支或Tag',
-            branchFilter: '.*',
-            tagFilter: '.*',
-            sortMode: 'DESCENDING_SMART',
-            selectedValue: 'DEFAULT',
-            quickFilterEnabled: true,
-            useRepository: 'git@github.com:shijinke1990/jenkins_demo.git'
-        )
-    }
-    
     environment {
         // GitHub仓库配置 - 使用SSH方式
         GIT_REPO = 'git@github.com:shijinke1990/jenkins_demo.git'
