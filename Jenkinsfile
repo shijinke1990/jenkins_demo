@@ -222,8 +222,8 @@ pipeline {
                                     # 创建部署目录
                                     mkdir -p ${DEPLOY_PATH}
                                     
-                                    # 备份现有的部署（如果存在）
-                                    if [ -f "${DEPLOY_PATH}/index.html" ] || [ -d "${DEPLOY_PATH}/assets" ]; then
+                                    # 备份现有的部署（如果目录不为空）
+                                    if [ "\$(ls -A ${DEPLOY_PATH} 2>/dev/null)" ]; then
                                         echo "📦 备份现有部署..."
                                         BACKUP_DIR="${DEPLOY_PATH}/../backup-\$(date +%Y%m%d-%H%M%S)"
                                         mkdir -p "\$BACKUP_DIR"
@@ -234,14 +234,17 @@ pipeline {
                                         # 清空目标目录，准备新部署
                                         echo "🧹 清理目标目录..."
                                         rm -rf ${DEPLOY_PATH}/*
+                                        echo "✅ 目标目录已清空"
+                                    else
+                                        echo "ℹ️  目标目录为空，无需备份"
                                     fi
                                     
                                     # 解压前端构建产物到目标目录
                                     echo "📦 解压构建产物到目标目录..."
                                     cd /tmp
                                     tar -xzf /tmp/dist.tar.gz
-                                    # 将dist目录内容移动到目标目录
-                                    mv dist/* ${DEPLOY_PATH}/
+                                    # 将dist目录内容复制到目标目录（包括隐藏文件）
+                                    cp -r dist/. ${DEPLOY_PATH}/
                                     # 清理临时dist目录
                                     rm -rf /tmp/dist
                                     echo "✅ 构建产物部署完成"
